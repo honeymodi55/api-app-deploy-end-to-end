@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: myapp
+  name: myapp
+  namespace: myapp-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+      - image: honeymodi1997/end-to-end-deploy:myapp-1.0
+        name: end-to-end-deploy
+        
