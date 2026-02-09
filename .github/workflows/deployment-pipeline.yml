@@ -1,0 +1,135 @@
+name: API App CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+    #was thinking of adding SonarQube static code analysis here, but will skip for now to keep it simple. Can add in future iterations if needed.
+    #adding static code analysis using basic Ruff linter to check for code quality and potential issues before running tests and building the Docker image.
+
+    lint:
+        name: Code Linting
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code from current repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                python-version: '3.11'
+                cache: 'pip'
+            
+            - name: Install dependencies
+              run: |
+                python -m pip install --upgrade pip
+                pip install -r myapp/requirements.txt
+                pip install pytest httpx
+
+            # Ruff is the basic linter for python code, it checks for code quality issues, potential bugs, and enforces coding standards. 
+            - name: Install Ruff linter
+              run: |
+                pip install ruff
+
+            - name: Run Ruff linter
+              # showing linting results in GitHub Actions summary ($GITHUB_STEP_SUMMARY) for better visibility of code quality issues directly in the workflow.
+              run: |
+                echo "### Linting Report 🚀" >> $GITHUB_STEP_SUMMARY
+                if ruff check myapp/ && ruff format --check myapp/; then
+                  echo "✅ No linting or formatting issues found!" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "❌ Issues found in code style or logic. Check the logs below." >> $GITHUB_STEP_SUMMARY
+                  exit 1
+                fi
+
+    test:
+        name: Unit Testing
+        needs: lint
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code from current repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                python-version: '3.11'
+                cache: 'pip'
+
+            - name: Install dependencies
+              # Also installing pytest,httpx and pytest-md here to ensure they are available for running tests, even though they are also in requirements.txt. This is to avoid any issues if someone forgets to add them to requirements.txt in the future.
+              run: |
+                python -m pip install --upgrade pip
+                pip install -r myapp/requirements.txt
+                pip install pytest httpx pytest-md
+
+            - name: Run tests with pytest
+              env:
+                PYTHONPATH: ${{ github.workspace }}/myapp #setting env so that pytest can find the application code and tests without import errors
+              # running pytest with report generation (md) and appending the report to GitHub Actions summary ($GITHUB_STEP_SUMMARY) for better visibility of test results in the workflow run.
+              run: |
+                pytest myapp/tests.py --md report.md 
+                cat report.md >> $GITHUB_STEP_SUMMARY
+        
+    build:
+        name: Build and Push Docker Image
+        needs: test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code from current repository
+              uses: actions/checkout@v4
+            
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                aws-region: ${{ secrets.AWS_REGION }}
+            
+            - name: Login to Amazon ECR
+              id: login-ecr
+              uses: aws-actions/amazon-ecr-login@v2
+            
+            - name: Build and Push Docker Image to ECR
+              env:
+                ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+                ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+                IMAGE_TAG: ${{ github.sha }}
+              run: |
+                docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f myapp/Dockerfile .
+                docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+    update-k8s-deployment-manifest:
+        name: Update Kubernetes Deployment file
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code from manifest repository
+              uses: actions/checkout@v4
+              with:
+                repository: ${{ secrets.GITHUBS_USERNAME }}/gitops-api-app
+                token: ${{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}
+            
+            - name: Login to Amazon ECR
+              id: login-ecr
+              uses: aws-actions/amazon-ecr-login@v2
+
+            - name: Update Kubernetes Deployment manifest with new image tag
+              env:
+                ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+                ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+                IMAGE_TAG: ${{ github.sha }}
+              run: |
+                sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" kubernetes/deployment.yaml
+                cat kubernetes/deployment.yaml #printing updated manifest for verification
+
+            - name: Commit and Push changes
+              run: |
+                git config --global user.email "github-actions@github.com"
+                git config --global user.name "GitHub Actions"
+                git add kubernetes/deployment.yaml
+                git commit -m "Update image to ${{ github.sha }} [skip ci]"
+                git push origin main
