@@ -108,6 +108,7 @@ jobs:
         steps:
             - name: Checkout code from manifest repository
               uses: actions/checkout@v4
+              id: checkout-manifest
               with:
                 repository: ${{ secrets.GITHUBS_USERNAME }}/gitops-api-app
                 token: ${{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}
@@ -139,4 +140,4 @@ jobs:
                 git config --global user.name "GitHub Actions"
                 git add kubernetes/deployment.yaml
                 git commit -m "Update image to ${{ github.sha }} [skip ci]"
-                git push origin main
+                git push https://x-access-token:${{ steps.checkout-manifest.outputs.token }}@github.com/${{ secrets.GITHUBS_USERNAME }}/gitops-api-app.git main
