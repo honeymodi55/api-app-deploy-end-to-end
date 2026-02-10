@@ -141,3 +141,4 @@ jobs:
                 git add kubernetes/deployment.yaml
                 git commit -m "Update image to ${{ github.sha }} [skip ci]"
                 git push https://x-access-token:${{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}@github.com/${{ secrets.GITHUBS_USERNAME }}/gitops-api-app.git main
+                
