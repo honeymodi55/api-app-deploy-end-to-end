@@ -30,7 +30,7 @@ FROM python:3.11-slim AS builder
 WORKDIR /app
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
+COPY myapp/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Stage 2: Runtime
@@ -45,7 +45,7 @@ RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
-COPY --chown=appuser:appuser . .
+COPY --chown=appuser:appuser myapp/ .
 
 # Switch to non-root user
 USER appuser
