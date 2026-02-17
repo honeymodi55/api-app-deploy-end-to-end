@@ -101,44 +101,95 @@ jobs:
                 docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f myapp/Dockerfile .
                 docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-    update-k8s-deployment-manifest:
-        name: Update Kubernetes Deployment file
+    ### for deploying the app to EC2 instance ###
+    deploy-to-ec2-instance:
+        name: deploying image to AWS EC2 instance
         needs: build
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-latest 
         steps:
-            - name: Checkout code from manifest repository
-              uses: actions/checkout@v4
-              id: checkout-manifest
-              with:
-                repository: ${{ secrets.GITHUBS_USERNAME }}/gitops-api-app
-                token: ${{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}
-                ref: 'main'
+          - name: Checkout code from current repository
+            uses: actions/checkout@v4
             
-            - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v4
-              with:
-                aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                aws-region: ${{ secrets.AWS_REGION }}
+          - name: Configure AWS credentials
+            uses: aws-actions/configure-aws-credentials@v4
+            with:
+              aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+              aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+              aws-region: ${{ secrets.AWS_REGION }}
             
-            - name: Login to Amazon ECR
-              id: login-ecr
-              uses: aws-actions/amazon-ecr-login@v2
+          - name: Login to Amazon ECR
+            id: login-ecr
+            uses: aws-actions/amazon-ecr-login@v2
 
-            - name: Update Kubernetes Deployment manifest with new image tag
-              env:
-                ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-                ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-                IMAGE_TAG: ${{ github.sha }}
-              run: |
-                sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" kubernetes/deployment.yaml
-                cat kubernetes/deployment.yaml #printing updated manifest for verification
+          - name: Deploy to EC2 via SSH
+            uses: appleboy/ssh-action@v1.0.3
+            with:
+              host: ${{ secrets.EC2_HOST }}       # EC2 Public IP or DNS
+              username: ec2-user
+              key: ${{ secrets.EC2_SSH_KEY }}     # .pem file content
+              envs: ECR_REGISTRY,ECR_REPOSITORY,IMAGE_TAG
+              script: |
+                # 1. Login to ECR on the EC2 instance
+                aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+                  
+                # 2. Stop and remove the old container (if it exists)
+                docker stop my-api-app || true
+                docker rm my-api-app || true
+                  
+                # 3. Pull the latest image
+                docker pull ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+                  
+                # 4. Run the new container on the same network as your monitoring stack
+                docker run -d \
+                  --name my-api-app \
+                  --network monitoring \
+                  -p 5000:5000 \
+                  -e OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317" \
+                  ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+            
 
-            - name: Commit and Push changes
-              run: |
-                git config --global user.email "github-actions@github.com"
-                git config --global user.name "GitHub Actions"
-                git add kubernetes/deployment.yaml
-                git commit -m "Update image to ${{ github.sha }} [skip ci]"
-                git push https://x-access-token:${{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}@github.com/${{ secrets.GITHUBS_USERNAME }}/gitops-api-app.git main
+
+    #### for GitOps style deployment ###
+    # update-k8s-deployment-manifest:
+    #     name: Update Kubernetes Deployment file
+    #     needs: build
+    #     runs-on: ubuntu-latest
+    #     steps:
+    #         - name: Checkout code from manifest repository
+    #           uses: actions/checkout@v4
+    #           id: checkout-manifest
+    #           with:
+    #             repository: {{ secrets.GITHUBS_USERNAME }}/gitops-api-app
+    #             token: {{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}
+    #             ref: 'main'
+            
+    #         - name: Configure AWS credentials
+    #           uses: aws-actions/configure-aws-credentials@v4
+    #           with:
+    #             aws-access-key-id: {{ secrets.AWS_ACCESS_KEY_ID }}
+    #             aws-secret-access-key: {{ secrets.AWS_SECRET_ACCESS_KEY }}
+    #             aws-region: {{ secrets.AWS_REGION }}
+            
+    #         - name: Login to Amazon ECR
+    #           id: login-ecr
+    #           uses: aws-actions/amazon-ecr-login@v2
+
+    #         - name: Update Kubernetes Deployment manifest with new image tag
+    #           env:
+    #             ECR_REGISTRY: {{ steps.login-ecr.outputs.registry }}
+    #             ECR_REPOSITORY: {{ secrets.ECR_REPOSITORY }}
+    #             IMAGE_TAG: {{ github.sha }}
+    #           run: |
+    #             sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" kubernetes/deployment.yaml
+    #             cat kubernetes/deployment.yaml #printing updated manifest for verification
+
+    #         - name: Commit and Push changes
+    #           run: |
+    #             git config --global user.email "github-actions@github.com"
+    #             git config --global user.name "GitHub Actions"
+    #             git add kubernetes/deployment.yaml
+    #             git commit -m "Update image to {{ github.sha }} [skip ci]"
+    #             git push https://x-access-token:{{ secrets.GITOPS_API_APP_ACCESS_TOKEN }}@github.com/{{ secrets.GITHUBS_USERNAME }}/gitops-api-app.git main
                 
+
+    
