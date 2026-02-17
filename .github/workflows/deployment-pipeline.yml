@@ -137,7 +137,7 @@ jobs:
                   
                 # 4. Run the new container on the same network as your monitoring stack
                 docker run -d \
-                  --name my-api-app \
+                  --name my-api-app-new \
                   ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
             
 
