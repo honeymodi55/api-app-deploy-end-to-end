@@ -138,7 +138,7 @@ jobs:
                 # 4. Run the new container on the same network as your monitoring stack
                 docker run -d \
                   --name my-api-app-new-final \
-                  --network monitoring \
+                  --network observability_monitoring \
                   -e OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317" \
                   -p 5000:5000 \
                   ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
