@@ -16,7 +16,9 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 # Use 'otel-collector' because that is the name of your container in the docker network
 resource = Resource.create({"service.name": "hello-world-api"})
 exporter = OTLPMetricExporter(endpoint="http://otel-collector:4317", insecure=True)
-reader = PeriodicExportingMetricReader(exporter, export_interval_millis=30000) # Export every 30s
+reader = PeriodicExportingMetricReader(
+    exporter, export_interval_millis=30000
+)  # Export every 30s
 provider = MeterProvider(resource=resource, metric_readers=[reader])
 metrics.set_meter_provider(provider)
 
@@ -25,6 +27,7 @@ app = FastAPI(title="Hello World API", version="1.0.0")
 # 2. Attach the Instrumentor
 # This captures http_server_duration, requests_total, etc.
 FastAPIInstrumentor.instrument_app(app)
+
 
 class HelloResponse(BaseModel):
     message: str
